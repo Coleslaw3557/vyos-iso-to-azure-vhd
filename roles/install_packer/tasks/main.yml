@@ -1,0 +1,41 @@
+---
+- name: Check if Packer is installed
+  block:
+    - name: Check if Packer is installed
+      ansible.builtin.package_facts:
+        manager: apt
+
+    - name: Set fact for Packer already installed status
+      ansible.builtin.set_fact:
+        packer_already_installed: "{{ 'packer' in ansible_facts.packages }}"
+        packer_needs_install: "{{ 'packer' not in ansible_facts.packages }}"
+
+- name: Add HashiCorp GPG Key and Repository
+  block:
+    - name: Download HashiCorp GPG key
+      ansible.builtin.apt_key:
+        url: "{{ hashicorp_apt_repo }}/gpg"
+        state: present
+
+    - name: Add HashiCorp apt repository
+      ansible.builtin.apt_repository:
+        repo: "deb [arch=amd64] {{ hashicorp_apt_repo }} {{ ansible_lsb.codename }} main"
+        state: present
+
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+
+    - name: Install Packer
+      ansible.builtin.apt:
+        name: packer
+        state: present
+      register: install_packer_result
+
+    - name: Set fact for Packer installation status
+      ansible.builtin.set_fact:
+        packer_needs_install: true
+        packer_already_installed: false
+      when: install_packer_result.changed
+  when: packer_already_installed == false
+  become: yes

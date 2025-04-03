@@ -1,0 +1,81 @@
+---
+- name: Verify Packer Jinja2 template exists
+  ansible.builtin.stat:
+    path: "{{ role_path }}/{{ packer_vyos_template_folder }}/{{ packer_vyos_template_j2 }}"
+  register: packer_j2_stat
+  failed_when: not packer_j2_stat.stat.exists
+
+- name: Create Packer config for VyOS rolling build
+  ansible.builtin.template:
+    src: "{{ packer_vyos_template_j2 }}"
+    dest: "{{ artifacts_folder }}/{{ packer_vyos_template }}"
+    mode: '0644'
+  register: packer_config
+
+- name: Debug Packer config creation
+  ansible.builtin.debug:
+    msg: "Packer config created at {{ artifacts_folder }}/{{ packer_vyos_template }}"
+  when: packer_config.changed
+
+- name: Check if Packer plugins folder exists
+  ansible.builtin.stat:
+    path: "~/.config/packer/plugins/github.com"
+  register: plugins_folder
+  become: yes
+
+- name: Initialize Packer configuration and fetch plugins
+  ansible.builtin.command:
+    cmd: /usr/bin/packer init {{ artifacts_folder }}/{{ packer_vyos_template }}
+  args:
+    chdir: "{{ playbook_dir }}"
+  register: packer_init
+  changed_when: >
+    plugins_folder.stat.exists == false and
+    packer_init.rc == 0 and 'No changes' not in packer_init.stdout
+  failed_when: packer_init.rc != 0
+  become: yes
+
+- name: Debug Packer init output
+  ansible.builtin.debug:
+    var: packer_init.stdout_lines
+  when: packer_init.changed
+
+- name: Check if {{ packer_vyos_image }} exists
+  ansible.builtin.stat:
+    path: "{{ artifacts_folder }}/{{ images_folder }}/{{ packer_vyos_image }}"
+  register: qcow2_stat
+
+- name: Build VyOS base image with Packer
+  ansible.builtin.command:
+    cmd: /usr/bin/packer build -force {{ artifacts_folder }}/{{ packer_vyos_template }}
+  args:
+    chdir: "{{ playbook_dir }}"
+  register: packer_build
+  changed_when: packer_build.rc == 0
+  timeout: 1200
+  when: iso_download.changed | default(false) or not qcow2_stat.stat.exists
+  become: yes
+
+- name: Verify qcow2 creation
+  ansible.builtin.stat:
+    path: "{{ artifacts_folder }}/{{ images_folder }}/{{ packer_vyos_image }}"
+  register: final_qcow2_stat
+
+- name: Change ownership of all files in a folder
+  ansible.builtin.file:
+    path: "{{ artifacts_folder }}/{{ images_folder }}"
+    owner: "{{ ansible_env.USER }}"
+    group: "{{ ansible_env.USER }}"
+    recurse: yes
+  become: yes
+
+- name: Set fact for Packer build success
+  ansible.builtin.set_fact:
+    build_success: true
+  when: final_qcow2_stat.stat.exists
+
+- name: Validate qcow2 file creation
+  ansible.builtin.assert:
+    that:
+      - final_qcow2_stat.stat.exists
+    fail_msg: "The qcow2 image was not created as expected!"

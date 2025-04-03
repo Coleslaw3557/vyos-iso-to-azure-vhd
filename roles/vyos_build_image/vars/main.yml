@@ -1,0 +1,8 @@
+# Folder for saving QCOW2 images
+images_folder: "images"
+
+# Packer related files
+packer_vyos_image: "vyos-{{ tag_name }}.qcow2"
+packer_vyos_template_j2: "vyos_base.pkr.hcl.j2"
+packer_vyos_template: "vyos_base.pkr.hcl"
+packer_vyos_template_folder: "templates"

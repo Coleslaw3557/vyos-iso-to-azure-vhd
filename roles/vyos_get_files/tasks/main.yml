@@ -1,0 +1,81 @@
+---
+- name: Fetch latest VyOS release info from GitHub API
+  ansible.builtin.uri:
+    url: "{{ vyos_api_url }}"
+    method: GET
+    headers:
+      Accept: application/vnd.github.v3+json
+    return_content: yes
+  register: github_release
+  failed_when: >
+    github_release.status != 200 or
+    github_release.json.assets is not defined or
+    github_release.json.tag_name is not defined
+
+- name: Extract file names and VyOS URLs
+  set_fact:
+    file_names: "{{ github_release.json | json_query('assets[*].name') }}"
+    vyos_rolling_urls: "{{ github_release.json | json_query('assets[*].browser_download_url') }}"
+    tag_name: "{{ github_release.json | json_query('tag_name') }}"
+
+- name: Set VyOS ISO name for Packer
+  set_fact:
+    vyos_rolling_iso: "{{ item }}"
+  with_items: "{{ file_names }}"
+  when: "'.minisig' not in item"
+
+- block:
+    - name: Ensure ISO folder exists
+      ansible.builtin.file:
+        path: "{{ artifacts_folder }}/{{ iso_folder }}"
+        state: directory
+
+    - name: Download latest VyOS minisign public key
+      get_url:
+        url: "{{ vyos_public_key_url }}/{{ vyos_public_key_name }}"
+        dest: "{{ artifacts_folder }}/{{ vyos_public_key_name }}"
+        mode: '0644'
+
+    - name: Download files using VyOS URLs
+      get_url:
+        url: "{{ vyos_rolling_urls[item] }}"
+        dest: "{{ artifacts_folder }}/{{ iso_folder }}/{{ file_names[item] }}"
+      loop: "{{ range(0, file_names | length) | list }}"
+      loop_control:
+        label: "{{ file_names[item] }}"
+      register: iso_download
+
+    - name: Verify ISO with minisign
+      ansible.builtin.command:
+        cmd: /usr/bin/minisign -Vm {{ artifacts_folder }}/{{ iso_folder }}/{{ vyos_rolling_iso }} -p {{ artifacts_folder }}/{{ vyos_public_key_name }}
+      register: minisign_verify
+      changed_when: false
+      failed_when: "'Signature and comment signature verified' not in minisign_verify.stdout"
+
+    - name: Set fact for ISO verification
+      ansible.builtin.set_fact:
+        iso_verified: true
+      when:
+        - iso_download is succeeded
+        - "'Signature and comment signature verified' in minisign_verify.stdout"
+
+  rescue:
+    - name: Log error during download or verification
+      debug:
+        msg: "Failed to download or verify the VyOS ISO."
+
+- name: Debug ISO verification status
+  debug:
+    msg: "The ISO signature has been successfully verified with minisign!"
+  when: "'Signature and comment signature verified' in minisign_verify.stdout"
+
+- name: Compute SHA256 checksum of the ISO
+  ansible.builtin.command:
+    cmd: /usr/bin/sha256sum {{ artifacts_folder }}/{{ iso_folder }}/{{ vyos_rolling_iso }}
+  register: sha256_result
+  changed_when: false
+
+- name: Set SHA256 fact
+  ansible.builtin.set_fact:
+    iso_checksum: "sha256:{{ sha256_result.stdout.split()[0] }}"
+  when: sha256_result is defined

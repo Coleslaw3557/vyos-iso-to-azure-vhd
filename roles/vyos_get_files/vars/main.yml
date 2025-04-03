@@ -1,0 +1,9 @@
+# VyOS public key for validating files
+vyos_public_key_url: "https://raw.githubusercontent.com/vyos/vyos-nightly-build/refs/heads/current"
+vyos_public_key_name: "minisign.pub"
+
+# VyOS URL for GitHub releases
+vyos_api_url: "https://api.github.com/repos/vyos/vyos-nightly-build/releases/latest"
+
+# Folder for downloading ISO image
+iso_folder: "iso"
