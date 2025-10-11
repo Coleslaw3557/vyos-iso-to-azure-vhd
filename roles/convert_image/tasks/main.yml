@@ -1,0 +1,69 @@
+---
+- name: Check if qcow2 image exists
+  ansible.builtin.stat:
+    path: "{{ artifacts_folder }}/{{ images_folder }}/{{ packer_vyos_image }}"
+  register: qcow2_exists
+
+- name: Extract image name without extension
+  ansible.builtin.set_fact:
+    image_name_base: "{{ packer_vyos_image | regex_replace('\\.qcow2$', '') }}"
+  when: qcow2_exists.stat.exists
+
+- name: Set conversion formats list
+  ansible.builtin.set_fact:
+    formats_to_convert: "{{ conversion_formats | default(default_conversion_formats) }}"
+  when: qcow2_exists.stat.exists
+
+- name: Check if converted images already exist
+  ansible.builtin.stat:
+    path: "{{ artifacts_folder }}/{{ images_folder }}/{{ image_name_base }}-{{ conversion_target }}.{{ item }}"
+  register: converted_images_exist
+  loop: "{{ formats_to_convert }}"
+  when: qcow2_exists.stat.exists
+
+- name: Convert qcow2 to other formats
+  ansible.builtin.command:
+    cmd: >
+      {{ playbook_dir }}/convert-diskimage.sh
+      -f {{ item.item }}
+      -n {{ image_name_base }}
+      -t {{ conversion_target }}
+      -p {{ artifacts_folder }}/{{ images_folder }}/{{ packer_vyos_image }}
+  args:
+    chdir: "{{ playbook_dir }}"
+  environment:
+    IMAGES_DIR: "{{ artifacts_folder }}/{{ images_folder }}"
+  loop: "{{ converted_images_exist.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - qcow2_exists.stat.exists
+    - not item.stat.exists
+  register: conversion_result
+  changed_when: conversion_result.rc == 0
+  become: yes
+
+- name: Verify converted images exist
+  ansible.builtin.stat:
+    path: "{{ artifacts_folder }}/{{ images_folder }}/{{ image_name_base }}-{{ conversion_target }}.{{ item }}"
+  register: final_converted_images
+  loop: "{{ formats_to_convert }}"
+  when: qcow2_exists.stat.exists
+
+- name: Change ownership of converted images
+  ansible.builtin.file:
+    path: "{{ artifacts_folder }}/{{ images_folder }}"
+    owner: "{{ ansible_env.USER }}"
+    group: "{{ ansible_env.USER }}"
+    recurse: yes
+  become: yes
+  when: qcow2_exists.stat.exists
+
+- name: Set fact for conversion success
+  ansible.builtin.set_fact:
+    conversion_success: true
+    converted_formats: "{{ formats_to_convert }}"
+    converted_image_paths: "{{ final_converted_images.results | map(attribute='stat.path') | list }}"
+  when:
+    - qcow2_exists.stat.exists
+    - final_converted_images.results | selectattr('stat.exists') | list | length == formats_to_convert | length

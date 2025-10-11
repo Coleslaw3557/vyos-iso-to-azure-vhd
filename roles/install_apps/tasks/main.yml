@@ -6,7 +6,7 @@
     update_cache: yes
   loop:
     - qemu-system
-    - minisign
+    - jq
   when: ansible_os_family == "Debian"
   register: install_results
   become: yes

@@ -25,7 +25,7 @@
 
 - name: Initialize Packer configuration and fetch plugins
   ansible.builtin.command:
-    cmd: /usr/bin/packer init {{ artifacts_folder }}/{{ packer_vyos_template }}
+    cmd: /usr/local/bin/packer init {{ artifacts_folder }}/{{ packer_vyos_template }}
   args:
     chdir: "{{ playbook_dir }}"
   register: packer_init
@@ -47,13 +47,13 @@
 
 - name: Build VyOS base image with Packer
   ansible.builtin.command:
-    cmd: /usr/bin/packer build -force {{ artifacts_folder }}/{{ packer_vyos_template }}
+    cmd: /usr/local/bin/packer build -force {{ artifacts_folder }}/{{ packer_vyos_template }}
   args:
     chdir: "{{ playbook_dir }}"
   register: packer_build
   changed_when: packer_build.rc == 0
   timeout: 1200
-  when: iso_download.changed | default(false) or not qcow2_stat.stat.exists
+  when: not qcow2_stat.stat.exists
   become: yes
 
 - name: Verify qcow2 creation

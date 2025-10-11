@@ -1,29 +1,47 @@
 ---
-- name: Fetch latest VyOS release info from GitHub API
-  ansible.builtin.uri:
-    url: "{{ vyos_api_url }}"
-    method: GET
-    headers:
-      Accept: application/vnd.github.v3+json
-    return_content: yes
-  register: github_release
-  failed_when: >
-    github_release.status != 200 or
-    github_release.json.assets is not defined or
-    github_release.json.tag_name is not defined
+# GitHub API mode
+- block:
+    - name: Fetch latest VyOS release info from GitHub API
+      ansible.builtin.uri:
+        url: "{{ vyos_api_url }}"
+        method: GET
+        headers:
+          Accept: application/vnd.github.v3+json
+        return_content: yes
+      register: github_release
+      failed_when: >
+        github_release.status != 200 or
+        github_release.json.assets is not defined or
+        github_release.json.tag_name is not defined
 
-- name: Extract file names and VyOS URLs
-  set_fact:
-    file_names: "{{ github_release.json | json_query('assets[*].name') }}"
-    vyos_rolling_urls: "{{ github_release.json | json_query('assets[*].browser_download_url') }}"
-    tag_name: "{{ github_release.json | json_query('tag_name') }}"
+    - name: Extract file names and VyOS URLs
+      set_fact:
+        file_names: "{{ github_release.json | json_query('assets[*].name') }}"
+        vyos_rolling_urls: "{{ github_release.json | json_query('assets[*].browser_download_url') }}"
+        tag_name: "{{ github_release.json | json_query('tag_name') }}"
 
-- name: Set VyOS ISO name for Packer
-  set_fact:
-    vyos_rolling_iso: "{{ item }}"
-  with_items: "{{ file_names }}"
-  when: "'.minisig' not in item"
+    - name: Set VyOS ISO name for Packer
+      set_fact:
+        vyos_rolling_iso: "{{ item }}"
+      with_items: "{{ file_names }}"
+      when: "'.minisig' not in item"
+  when: iso_source_mode == 'github_api'
 
+# Static URL mode
+- block:
+    - name: Set variables for static URL mode
+      set_fact:
+        vyos_rolling_iso: "{{ static_iso_filename }}"
+        tag_name: "{{ static_tag_name }}"
+        file_names:
+          - "{{ static_iso_filename }}"
+          - "{{ static_iso_filename }}.minisig"
+        vyos_rolling_urls:
+          - "{{ static_iso_url }}"
+          - "{{ static_iso_sig_url }}"
+  when: iso_source_mode == 'static_url'
+
+# Common download and verification tasks
 - block:
     - name: Ensure ISO folder exists
       ansible.builtin.file:

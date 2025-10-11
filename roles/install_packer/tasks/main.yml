@@ -1,41 +1,67 @@
 ---
-- name: Check if Packer is installed
-  block:
-    - name: Check if Packer is installed
-      ansible.builtin.package_facts:
-        manager: apt
+- name: Check if HashiCorp Packer is installed
+  ansible.builtin.stat:
+    path: /usr/local/bin/packer
+  register: packer_binary
 
-    - name: Set fact for Packer already installed status
-      ansible.builtin.set_fact:
-        packer_already_installed: "{{ 'packer' in ansible_facts.packages }}"
-        packer_needs_install: "{{ 'packer' not in ansible_facts.packages }}"
+- name: Check Packer version if installed
+  ansible.builtin.command: /usr/local/bin/packer version
+  register: packer_version_check
+  when: packer_binary.stat.exists
+  changed_when: false
+  failed_when: false
 
-- name: Add HashiCorp GPG Key and Repository
-  block:
-    - name: Download HashiCorp GPG key
-      ansible.builtin.apt_key:
-        url: "{{ hashicorp_apt_repo }}/gpg"
-        state: present
-
-    - name: Add HashiCorp apt repository
-      ansible.builtin.apt_repository:
-        repo: "deb [arch=amd64] {{ hashicorp_apt_repo }} {{ ansible_lsb.codename }} main"
-        state: present
-
-    - name: Update apt cache
-      ansible.builtin.apt:
-        update_cache: yes
-
-    - name: Install Packer
-      ansible.builtin.apt:
-        name: packer
-        state: present
-      register: install_packer_result
-
-    - name: Set fact for Packer installation status
-      ansible.builtin.set_fact:
-        packer_needs_install: true
-        packer_already_installed: false
-      when: install_packer_result.changed
-  when: packer_already_installed == false
+- name: Remove conflicting Ubuntu packer package
+  ansible.builtin.apt:
+    name: packer
+    state: absent
+    purge: yes
   become: yes
+  when: not packer_binary.stat.exists or (packer_version_check.stdout is defined and 'v1.3' in packer_version_check.stdout)
+
+- name: Install HashiCorp Packer
+  block:
+    - name: Get latest Packer version from GitHub
+      ansible.builtin.uri:
+        url: https://api.github.com/repos/hashicorp/packer/releases/latest
+        return_content: yes
+      register: packer_latest_release
+
+    - name: Set Packer version variable
+      ansible.builtin.set_fact:
+        packer_version: "{{ packer_latest_release.json.tag_name | regex_replace('^v', '') }}"
+
+    - name: Download Packer binary
+      ansible.builtin.get_url:
+        url: "https://releases.hashicorp.com/packer/{{ packer_version }}/packer_{{ packer_version }}_linux_amd64.zip"
+        dest: "/tmp/packer_{{ packer_version }}_linux_amd64.zip"
+        mode: '0644'
+
+    - name: Install unzip if not present
+      ansible.builtin.apt:
+        name: unzip
+        state: present
+      become: yes
+
+    - name: Unzip Packer binary
+      ansible.builtin.unarchive:
+        src: "/tmp/packer_{{ packer_version }}_linux_amd64.zip"
+        dest: /usr/local/bin
+        remote_src: yes
+        mode: '0755'
+      become: yes
+
+    - name: Clean up downloaded zip file
+      ansible.builtin.file:
+        path: "/tmp/packer_{{ packer_version }}_linux_amd64.zip"
+        state: absent
+
+    - name: Verify Packer installation
+      ansible.builtin.command: /usr/local/bin/packer version
+      register: packer_version_output
+      changed_when: false
+
+    - name: Display installed Packer version
+      ansible.builtin.debug:
+        msg: "Installed Packer version: {{ packer_version_output.stdout }}"
+  when: not packer_binary.stat.exists or (packer_version_check.stdout is defined and 'v1.3' in packer_version_check.stdout)

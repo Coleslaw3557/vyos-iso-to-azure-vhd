@@ -1,0 +1,6 @@
+# Image conversion target name
+conversion_target: "generic"
+
+# Default conversion formats
+default_conversion_formats:
+  - vhd

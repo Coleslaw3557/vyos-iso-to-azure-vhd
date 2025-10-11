@@ -27,29 +27,31 @@
     - role: install_packer
     - role: vyos_get_files
     - role: vyos_build_image
+    - role: convert_image
+      when: convert_images | default(false)
   
   post_tasks:
     - name: Applications installation summary
       ansible.builtin.debug:
         msg: "Applications installed."
-      when: install_success == true
-
-    - name: Packer already installed summary
-      ansible.builtin.debug:
-        msg: "Packer was already installed."
-      when: packer_already_installed == true
+      when: install_success is defined and install_success == true
 
     - name: Packer installation summary
       ansible.builtin.debug:
         msg: "Packer installed successfully."
-      when: packer_needs_install == true
+      when: packer_version is defined
 
     - name: ISO download summary
       ansible.builtin.debug:
         msg: "VyOS rolling ISO for {{ tag_name }} downloaded and verified."
-      when: iso_verified == true
+      when: iso_verified is defined and iso_verified == true
 
     - name: QCOW2 image build summary
       ansible.builtin.debug:
         msg: "VyOS image built and saved at {{ artifacts_folder }}/{{ images_folder }}/{{ packer_vyos_image }}."
-      when: build_success == true
+      when: build_success is defined and build_success == true
+
+    - name: Image conversion summary
+      ansible.builtin.debug:
+        msg: "VyOS image converted to {{ converted_formats | join(', ') }} format(s) successfully."
+      when: conversion_success is defined and conversion_success == true
