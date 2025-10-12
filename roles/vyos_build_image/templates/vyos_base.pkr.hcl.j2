@@ -30,17 +30,22 @@ variable "image_name" {
 source "qemu" "vyos_rolling" {
   iso_url          = var.iso_url
   iso_checksum     = var.iso_checksum
-  communicator     = "none"
+  communicator     = "ssh"
+  ssh_username     = "{{ vm_username }}"
+  ssh_password     = "{{ vm_password }}"
+  ssh_timeout      = "20m"
+  ssh_handshake_attempts = 100
   disk_size        = "20G"
   format           = "qcow2"
-  memory           = 512
-  cpus             = 1
+  memory           = 2048
+  cpus             = 2
   headless         = true
   accelerator      = "kvm"
   vm_name          = var.image_name
   net_device       = "virtio-net"
   disk_interface   = "virtio"
   vnc_bind_address = "0.0.0.0"
+  http_directory   = "{{ playbook_dir }}/http"
   boot_wait        = "90s"
   qemuargs         = [
     ["-serial", "file:{{ artifacts_folder }}/serial.log"]
@@ -49,6 +54,13 @@ source "qemu" "vyos_rolling" {
     "<wait5>",
     "vyos<enter><wait>",
     "vyos<enter><wait3>",
+    "configure<enter><wait>",
+    "set interfaces ethernet eth0 address 'dhcp'<enter><wait>",
+    "set system name-server '8.8.8.8'<enter><wait>",
+    "set service ssh port '22'<enter><wait>",
+    "commit<enter><wait2s>",
+    "save<enter><wait2s>",
+    "exit<enter><wait>",
     "install image<enter><wait>",
     "y<enter><wait>",
     "<enter><wait>",
@@ -59,11 +71,149 @@ source "qemu" "vyos_rolling" {
     "y<enter><wait>",
     "Y<enter><wait5>",
     "<enter><wait90>",
-    "poweroff now<enter>"
+    "reboot<enter><wait>",
+    "y<enter>"
   ]
   output_directory = var.output_dir
+  shutdown_command = "sudo poweroff"
 }
 
 build {
   sources = ["source.qemu.vyos_rolling"]
+
+  # Upload provisioning scripts
+  provisioner "shell" {
+    inline = [
+      "mkdir -p /tmp/vyos"
+    ]
+  }
+
+  provisioner "file" {
+    source      = "{{ playbook_dir }}/scripts/vyos/"
+    destination = "/tmp/vyos/"
+  }
+
+  # Make scripts executable
+  provisioner "shell" {
+    inline = [
+      "sudo chmod +x /tmp/vyos/*.sh"
+    ]
+  }
+
+  # Initialize machine-id and prepare environment
+  provisioner "shell" {
+    script = "{{ playbook_dir }}/scripts/vyos/init.sh"
+    execute_command = "{{ '{{' }} .Vars {{ '}}' }} sudo -E bash '{{ '{{' }} .Path {{ '}}' }}'"
+  }
+
+  # Configure APT repositories (needed for both waagent and cloud-init)
+  provisioner "shell" {
+    script = "{{ playbook_dir }}/scripts/vyos/apt-repo-debian.sh"
+    environment_vars = [
+      "CLOUD_INIT=debian",
+      "VYOS_RELEASE={{ vyos_release }}"
+    ]
+    execute_command = "{{ '{{' }} .Vars {{ '}}' }} sudo -E bash '{{ '{{' }} .Path {{ '}}' }}'"
+  }
+
+{% if provisioning_agent == 'cloud-init' %}
+  # === Cloud-init provisioning mode ===
+
+  # Install cloud-init packages
+  provisioner "shell" {
+    script = "{{ playbook_dir }}/scripts/vyos/cloud-init-{{ cloud_init_source }}.sh"
+    environment_vars = [
+      "CLOUD_INIT={{ cloud_init_source }}",
+      "VYOS_RELEASE={{ vyos_release }}"
+    ]
+    execute_command = "{{ '{{' }} .Vars {{ '}}' }} sudo -E bash '{{ '{{' }} .Path {{ '}}' }}'"
+  }
+
+  # Configure cloud-init datasource
+  provisioner "shell" {
+    script = "{{ playbook_dir }}/scripts/vyos/cloud-init-datasource.sh"
+    environment_vars = [
+      "CLOUD_INIT={{ cloud_init_source }}",
+      "CLOUD_INIT_DATASOURCE={{ cloud_init_datasource }}"
+    ]
+    execute_command = "{{ '{{' }} .Vars {{ '}}' }} sudo -E bash '{{ '{{' }} .Path {{ '}}' }}'"
+  }
+
+  # Configure cloud-init to wait for VyOS router service
+  provisioner "shell" {
+    script = "{{ playbook_dir }}/scripts/vyos/cloud-init-wait-vyos.sh"
+    execute_command = "{{ '{{' }} .Vars {{ '}}' }} sudo -E bash '{{ '{{' }} .Path {{ '}}' }}'"
+  }
+
+{% if cloud_init_with_waagent | default(false) %}
+  # Install Azure Linux Agent (waagent) alongside cloud-init
+  provisioner "shell" {
+    script = "{{ playbook_dir }}/scripts/vyos/azure-waagent.sh"
+    environment_vars = [
+      "PROVISIONING_AGENT={{ provisioning_agent }}",
+      "WAAGENT_VERSION={{ waagent_version }}"
+    ]
+    execute_command = "{{ '{{' }} .Vars {{ '}}' }} sudo -E bash '{{ '{{' }} .Path {{ '}}' }}'"
+  }
+{% endif %}
+
+{% elif provisioning_agent == 'waagent' %}
+  # === Azure Linux Agent (waagent) provisioning mode ===
+
+  # Install Azure Linux Agent (waagent) as standalone provisioning agent
+  provisioner "shell" {
+    script = "{{ playbook_dir }}/scripts/vyos/azure-waagent.sh"
+    environment_vars = [
+      "PROVISIONING_AGENT={{ provisioning_agent }}",
+      "WAAGENT_VERSION={{ waagent_version }}"
+    ]
+    execute_command = "{{ '{{' }} .Vars {{ '}}' }} sudo -E bash '{{ '{{' }} .Path {{ '}}' }}'"
+  }
+
+{% endif %}
+
+  # Install platform-specific packages (qemu-guest-agent for Azure)
+  provisioner "shell" {
+    script = "{{ playbook_dir }}/scripts/vyos/platform-qemu.sh"
+    environment_vars = [
+      "PLATFORM={{ platform }}"
+    ]
+    execute_command = "{{ '{{' }} .Vars {{ '}}' }} sudo -E bash '{{ '{{' }} .Path {{ '}}' }}'"
+  }
+
+  # Install additional packages
+  provisioner "shell" {
+    script = "{{ playbook_dir }}/scripts/vyos/apt-install.sh"
+    execute_command = "{{ '{{' }} .Vars {{ '}}' }} sudo -E bash '{{ '{{' }} .Path {{ '}}' }}'"
+  }
+
+  # Configure VyOS system
+  provisioner "shell" {
+    script = "{{ playbook_dir }}/scripts/vyos/configure.sh"
+    execute_command = "{{ '{{' }} .Vars {{ '}}' }} sudo -E bash '{{ '{{' }} .Path {{ '}}' }}'"
+  }
+
+  # OS preparation
+  provisioner "shell" {
+    script = "{{ playbook_dir }}/scripts/vyos/osprep.sh"
+    execute_command = "{{ '{{' }} .Vars {{ '}}' }} sudo -E bash '{{ '{{' }} .Path {{ '}}' }}'"
+  }
+
+  # Configure Azure serial console
+  provisioner "shell" {
+    script = "{{ playbook_dir }}/scripts/vyos/azure-serial-console.sh"
+    execute_command = "{{ '{{' }} .Vars {{ '}}' }} sudo -E bash '{{ '{{' }} .Path {{ '}}' }}'"
+  }
+
+  # Cleanup VyOS configuration
+  provisioner "shell" {
+    script = "{{ playbook_dir }}/scripts/vyos/cleanup-vyos-configure.sh"
+    execute_command = "{{ '{{' }} .Vars {{ '}}' }} sudo -E bash '{{ '{{' }} .Path {{ '}}' }}'"
+  }
+
+  # Final cleanup
+  provisioner "shell" {
+    script = "{{ playbook_dir }}/scripts/vyos/cleanup.sh"
+    execute_command = "{{ '{{' }} .Vars {{ '}}' }} sudo -E bash '{{ '{{' }} .Path {{ '}}' }}'"
+  }
 }

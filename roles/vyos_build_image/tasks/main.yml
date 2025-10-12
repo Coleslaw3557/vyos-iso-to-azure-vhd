@@ -52,7 +52,7 @@
     chdir: "{{ playbook_dir }}"
   register: packer_build
   changed_when: packer_build.rc == 0
-  timeout: 1200
+  timeout: 3600
   when: not qcow2_stat.stat.exists
   become: yes
 
