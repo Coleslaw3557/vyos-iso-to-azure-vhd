@@ -10,15 +10,10 @@ rm -rf /home/vyos/cleanup-vyos.sh
 # fix config permissions since if we edited with root user
 # sudo chown -R root:vyattacfg /opt/vyatta/config/active/
 
-# Deprovision waagent if it's installed
-if command -v waagent >/dev/null 2>&1; then
-    echo "Running waagent deprovision to prepare image for Azure..."
-    # Use -deprovision+user to remove the provisioned user and SSH keys
-    # Use -force to avoid interactive prompts
-    waagent -deprovision+user -force || {
-        echo "Warning: waagent deprovision failed, continuing anyway"
-    }
-fi
+# Skip waagent deprovision to preserve Provisioning.Agent configuration
+# The deprovision step resets waagent.conf to defaults (Provisioning.Agent=auto)
+# Since this is a fresh Packer build, deprovision is not necessary
+echo "Skipping waagent deprovision to preserve configuration..."
 
 # reconfiguring ssh
 rm -f /etc/ssh/ssh_host_*
