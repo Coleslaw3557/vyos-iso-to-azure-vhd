@@ -158,7 +158,13 @@ VyOS has restricted access to LTS package repositories (equuleus, sagitta) for p
 
 **Azure Provisioning:** 
 
-For Azure deployments, **waagent is strongly recommended** as the standalone provisioning agent. Azure expects waagent to report provisioning status. The default configuration (`provisioning_agent: "waagent"`) installs **WALinux Agent v2.14.0.1** from source and configures it as the primary provisioning agent with `Provisioning.Agent=auto`. This avoids conflicts that can occur when both cloud-init and waagent are installed.
+For Azure deployments, **waagent is strongly recommended** as the standalone provisioning agent. Azure expects waagent to report provisioning status. The default configuration (`provisioning_agent: "waagent"`) installs **WALinux Agent v2.14.0.1** from source and configures it as the primary provisioning agent with `Provisioning.Agent=waagent` (not `auto`). This explicit configuration ensures waagent takes full ownership of provisioning tasks including:
+- Reporting provisioning completion to Azure
+- Handling SSH keys
+- Setting hostname
+- Managing user accounts
+
+**Important**: The image is properly generalized during build using `waagent -deprovision+user -force` to ensure it's ready for Azure provisioning. This avoids conflicts that can occur when both cloud-init and waagent are installed.
 
 ### Disk Size
 
@@ -184,7 +190,7 @@ The build automatically creates an Azure-ready VHD in fixed format:
 
 **Provisioning Support:** By default, this build installs Azure Linux Agent (walinuxagent v2.14.0.1) as the standalone provisioning agent, along with qemu-guest-agent for proper integration with Azure. The provisioning agent is injected into the image **before first boot**, ensuring proper initialization and provisioning status reporting to Azure.
 
-**Important:** The build installs **WALinux Agent v2.14.0.1** from MS repo (not from Debian repos) to ensure the latest features and compatibility. When using waagent as the standalone provisioning agent (default), it is configured with `Provisioning.Agent=auto`. If you choose cloud-init mode with waagent enabled, it will be configured with `Provisioning.Agent=cloud-init`. I had issues getting both of these to coexist together.
+**Important:** The build installs **WALinux Agent v2.14.0.1** from GitHub source (not from Debian repos) to ensure the latest features and compatibility. When using waagent as the standalone provisioning agent (default), it is configured with `Provisioning.Agent=waagent` to explicitly handle all provisioning tasks. This prevents the ambiguity that occurs with `auto` mode and ensures proper provisioning especially for VMs with managed identities or complex dependencies. If you choose cloud-init mode with waagent enabled, it will be configured with `Provisioning.Agent=cloud-init`. The image is properly generalized with `waagent -deprovision+user -force` during the build cleanup phase.
 
 **Azure Serial Console:** The image is configured with serial console support enabled by default (ttyS0 at 115200 baud, 8N1). You can access the console through Azure Portal → VM → Serial Console or via Azure CLI. Both GRUB bootloader output and login prompt are available on the serial console for troubleshooting boot issues.
 
@@ -341,6 +347,31 @@ sudo journalctl --since "05:40" --until "05:45" | grep -E "(error|fail|vyos)"
 
 **Note:** Adjust the `--since` and `--until` times to match when your VM was provisioned.
 
+### Troubleshooting WALinux Agent Provisioning Issues
+
+If you experience problems with Azure VMs failing to provision (especially with managed identities), check these items:
+
+**Verify waagent configuration:**
+
+```bash
+# Check the provisioning agent setting
+grep "Provisioning.Agent" /etc/waagent.conf
+# Should show: Provisioning.Agent=waagent (NOT auto)
+
+# Check waagent service status
+sudo systemctl status walinuxagent
+sudo journalctl -u walinuxagent -n 100
+
+# Check if waagent is reporting ready to Azure
+sudo cat /var/log/waagent.log | grep -i "provisioning"
+```
+
+**Common provisioning issues:**
+
+1. **Provisioning.Agent=auto**: If set to "auto" without cloud-init present, waagent doesn't take full ownership of provisioning, causing timeouts with managed identities
+2. **Image not deprovisioned**: If the image wasn't properly generalized with `waagent -deprovision+user -force`, Azure may fail to provision correctly
+3. **Service not running**: Ensure walinuxagent.service is enabled and running
+
 ## Architecture
 
 ```
@@ -366,7 +397,7 @@ build.yml
 7. **Provisioning agent installation:**
    - **If provisioning_agent: "waagent" (default):**
      - Install Azure Linux Agent (walinuxagent v2.14.0.1 from source)
-     - Configure waagent with Provisioning.Agent=auto
+     - Configure waagent with Provisioning.Agent=waagent (explicit provisioning ownership)
    - **If provisioning_agent: "cloud-init":**
      - Install cloud-init packages
      - Configure Azure datasource
@@ -374,7 +405,10 @@ build.yml
      - Optionally install waagent if cloud_init_with_waagent: true
 8. Install qemu-guest-agent
 9. Configure Azure serial console (GRUB + getty on ttyS0)
-10. System cleanup and optimization
+10. System cleanup and optimization:
+    - Run `waagent -deprovision+user -force` to generalize for Azure
+    - Remove SSH host keys, machine-id, logs, and history
+    - Zero out free disk space
 11. Shutdown and convert to final qcow2
 12. Convert qcow2 to VHD/VMDK (if enabled)
 

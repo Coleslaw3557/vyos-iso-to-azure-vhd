@@ -87,7 +87,7 @@ if [[ "${PROVISIONING_MODE}" == "cloud-init" ]]; then
     PROVISIONING_AGENT_CONFIG="cloud-init"
     echo "Configuring waagent to work with cloud-init (cloud-init handles provisioning)"
 else
-    PROVISIONING_AGENT_CONFIG="auto"
+    PROVISIONING_AGENT_CONFIG="waagent"
     echo "Configuring waagent as standalone provisioning agent"
 fi
 
