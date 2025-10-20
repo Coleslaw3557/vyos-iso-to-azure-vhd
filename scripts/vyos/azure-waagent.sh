@@ -1,4 +1,12 @@
 #!/bin/bash
+#
+# Azure Linux Agent (waagent) installation for VyOS
+#
+# This script installs waagent with a minimal, VyOS-compatible configuration that:
+# - Disables ALL provisioning functions to prevent conflicts with VyOS config system
+# - Keeps only essential Azure functionality (extensions, monitoring, updates)
+# - Ensures waagent starts AFTER VyOS services to avoid configuration conflicts
+# - Prevents waagent from managing resources that VyOS controls (network, SSH, disks)
 
 set -e
 set -x
@@ -65,8 +73,9 @@ echo "Creating walinuxagent systemd service..."
 cat <<SERVICEEOF > /etc/systemd/system/walinuxagent.service
 [Unit]
 Description=Azure Linux Agent
-Wants=network-online.target sshd.service sshd-keygen.service
-After=network-online.target
+# Ensure waagent starts AFTER VyOS config system loads
+Wants=network-online.target vyos-router.service
+After=network-online.target vyos-router.service vyos-config.service
 ConditionFileIsExecutable=${WAAGENT_BIN}
 
 [Service]
@@ -83,55 +92,66 @@ SERVICEEOF
 systemctl daemon-reload
 
 # Configure waagent based on provisioning mode
+# Note: For VyOS, we always disable provisioning regardless of mode
 if [[ "${PROVISIONING_MODE}" == "cloud-init" ]]; then
-    PROVISIONING_AGENT_CONFIG="cloud-init"
-    echo "Configuring waagent to work with cloud-init (cloud-init handles provisioning)"
+    echo "Configuring waagent to work with cloud-init (provisioning disabled for VyOS)"
 else
-    PROVISIONING_AGENT_CONFIG="waagent"
-    echo "Configuring waagent as standalone provisioning agent"
+    echo "Configuring waagent as monitoring agent only (provisioning disabled for VyOS)"
 fi
 
 cat <<EOF > /etc/waagent.conf
 # Microsoft Azure Linux Agent Configuration (v${WAAGENT_VERSION})
+# Minimal waagent.conf for VyOS on Azure
 
-# Provisioning agent configuration
-Provisioning.Agent=${PROVISIONING_AGENT_CONFIG}
+# CRITICAL: Disable ALL provisioning to prevent VyOS conflicts
+Provisioning.Agent=disabled
+Provisioning.DeleteRootPassword=n
+Provisioning.RegenerateSshHostKeyPair=n
+Provisioning.MonitorHostName=n
+Provisioning.DecodeCustomData=n
+Provisioning.ExecuteCustomData=n
 
-# Monitor hostname changes
-Provisioning.MonitorHostName=y
+# Keep extensions for Azure functionality
+Extensions.Enabled=y
+Extensions.GoalStatePeriod=6
 
-# Resource disk configuration (Azure temporary disk)
-ResourceDisk.Format=y
-ResourceDisk.Filesystem=ext4
-ResourceDisk.MountPoint=/mnt/resource
+# Disable resource disk management - VyOS handles its own disks
+ResourceDisk.Format=n
 ResourceDisk.EnableSwap=n
 
-# Logging configuration
+# Logging - keep minimal
 Logs.Verbose=n
 Logs.Collect=y
 Logs.CollectPeriod=3600
 
-# HTTP proxy settings (if needed)
-HttpProxy.Host=None
-HttpProxy.Port=None
-
-# Network and OS settings
-OS.EnableRDMA=n
-OS.RootDeviceScsiTimeout=300
+# Network settings - let VyOS handle networking
 OS.EnableFirewall=n
-OS.MonitorDhcpClientRestartPeriod=30
-OS.SshClientAliveInterval=180
+OS.MonitorDhcpClientRestartPeriod=0
+OS.RemovePersistentNetRulesPeriod=0
+OS.AllowHTTP=n
 
-# Enable VM extensions
-Extensions.Enabled=y
-Extensions.GoalStatePeriod=6
+# Keep SCSI timeout for Azure storage
+OS.RootDeviceScsiTimeout=300
+OS.RootDeviceScsiTimeoutPeriod=30
 
-# Auto-update settings (UpdateToLatestVersion is recommended for v2.14+)
+# SSH - VyOS manages this
+OS.SshClientAliveInterval=0
+OS.SshDir=/etc/ssh
+
+# Auto-update agent for security patches
 AutoUpdate.UpdateToLatestVersion=y
 AutoUpdate.Enabled=y
 
-# CGroups resource limits
+# Resource limits
 CGroups.EnforceLimits=y
+CGroups.Excluded=customscript,runcommand
+
+# Protocol discovery
+Protocol.EndpointDiscovery=static
+
+# HTTP proxy settings (if needed)
+HttpProxy.Host=None
+HttpProxy.Port=None
 EOF
 
 # Enable waagent service
