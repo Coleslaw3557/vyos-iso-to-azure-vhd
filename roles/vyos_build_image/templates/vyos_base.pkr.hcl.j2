@@ -182,6 +182,18 @@ build {
     execute_command = "{{ '{{' }} .Vars {{ '}}' }} sudo -E bash '{{ '{{' }} .Path {{ '}}' }}'"
   }
 
+  # Fix VyOS bugs (syntax errors in bash functions)
+  provisioner "shell" {
+    script = "{{ playbook_dir }}/scripts/vyos/fix-vyos-bugs.sh"
+    execute_command = "{{ '{{' }} .Vars {{ '}}' }} sudo -E bash '{{ '{{' }} .Path {{ '}}' }}'"
+  }
+
+  # Fix VyOS configuration permissions
+  provisioner "shell" {
+    script = "{{ playbook_dir }}/scripts/vyos/fix-vyattacfg-permissions.sh"
+    execute_command = "{{ '{{' }} .Vars {{ '}}' }} sudo -E bash '{{ '{{' }} .Path {{ '}}' }}'"
+  }
+
   # OS preparation
   provisioner "shell" {
     script = "{{ playbook_dir }}/scripts/vyos/osprep.sh"

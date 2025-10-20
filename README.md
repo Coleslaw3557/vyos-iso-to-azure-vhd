@@ -39,6 +39,8 @@ A lot of this was glued together with Claude LLM.
 - SSH-based provisioning for customization
 - Automatic image conversion to VHD (Azure), VMDK (VMware), or other formats (I've only tested Azure)
 - Serial console logging for debugging
+- **Automatic bug fixes for VyOS 1.5-stream-2025-Q2 syntax errors**
+- **Protection against VyOS configuration permission corruption**
 
 ## Requirements
 
@@ -191,6 +193,20 @@ The build automatically creates an Azure-ready VHD in fixed format:
   
   
 These systemctl ordering items have room for improvement... once I got it working I didn't want to go back and mess with it further.
+
+**VyOS 1.5-stream-2025-Q2 Bug Fixes:** The build automatically detects and fixes critical bugs in VyOS 1.5-stream-2025-Q2:
+
+  1. **Bash Function Syntax Errors**: VyOS 1.5-stream-2025-Q2 contains invalid bash function names with hyphens (e.g., `commit-confirm`, `rollback-soft`) that prevent configuration mode from working. The build automatically fixes these in:
+     - `/opt/vyatta/share/vyatta-cfg/functions/interpreter/vyatta-cfg-run`
+     - `/opt/vyatta/etc/functions/script-template`
+     - `/etc/bash_completion.d/vyatta-cfg`
+
+  2. **Configuration Permission Protection**: The build includes scripts to prevent and fix VyOS configuration permission corruption that can occur when using `sudo` with configuration commands. It ensures:
+     - `/opt/vyatta/config/active/` maintains correct `root:vyattacfg` ownership
+     - Configuration scripts use `sg vyattacfg` instead of `sudo` to preserve permissions
+     - Stale configuration sessions are cleaned up automatically
+
+  These fixes are only applied to VyOS 1.5-stream-2025-Q2 versions and are skipped for other releases.
 
 ## Development
 
@@ -389,13 +405,17 @@ build.yml
    - Configure waagent with Provisioning.Agent=cloud-init
    - Waagent manages Azure extensions only
 9. Install qemu-guest-agent
-10. Configure Azure serial console (GRUB + getty on ttyS0)
-11. System cleanup and optimization:
+10. Configure VyOS system settings
+11. **Apply VyOS bug fixes (if 1.5-stream-2025-Q2 detected):**
+    - Fix bash function syntax errors in system files
+    - Fix configuration permission issues
+12. Configure Azure serial console (GRUB + getty on ttyS0)
+13. System cleanup and optimization:
     - Run `waagent -deprovision+user -force` to generalize for Azure
     - Remove SSH host keys, machine-id, logs, and history
     - Zero out free disk space
-12. Shutdown and convert to final qcow2
-13. Convert qcow2 to VHD/VMDK (if enabled)
+14. Shutdown and convert to final qcow2
+15. Convert qcow2 to VHD/VMDK (if enabled)
 
 ## License
 
