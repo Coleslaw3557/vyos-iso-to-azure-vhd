@@ -116,10 +116,7 @@ build {
     execute_command = "{{ '{{' }} .Vars {{ '}}' }} sudo -E bash '{{ '{{' }} .Path {{ '}}' }}'"
   }
 
-{% if provisioning_agent == 'cloud-init' %}
-  # === Cloud-init provisioning mode ===
-
-  # Install cloud-init packages
+  # Install cloud-init packages (handles provisioning)
   provisioner "shell" {
     script = "{{ playbook_dir }}/scripts/vyos/cloud-init-{{ cloud_init_source }}.sh"
     environment_vars = [
@@ -129,12 +126,12 @@ build {
     execute_command = "{{ '{{' }} .Vars {{ '}}' }} sudo -E bash '{{ '{{' }} .Path {{ '}}' }}'"
   }
 
-  # Configure cloud-init datasource
+  # Configure cloud-init datasource for Azure
   provisioner "shell" {
     script = "{{ playbook_dir }}/scripts/vyos/cloud-init-datasource.sh"
     environment_vars = [
       "CLOUD_INIT={{ cloud_init_source }}",
-      "CLOUD_INIT_DATASOURCE={{ cloud_init_datasource }}"
+      "CLOUD_INIT_DATASOURCE=azure"
     ]
     execute_command = "{{ '{{' }} .Vars {{ '}}' }} sudo -E bash '{{ '{{' }} .Path {{ '}}' }}'"
   }
@@ -145,32 +142,24 @@ build {
     execute_command = "{{ '{{' }} .Vars {{ '}}' }} sudo -E bash '{{ '{{' }} .Path {{ '}}' }}'"
   }
 
-{% if cloud_init_with_waagent | default(false) %}
-  # Install Azure Linux Agent (waagent) alongside cloud-init
+  # Configure VyOS-specific cloud-init modules
   provisioner "shell" {
-    script = "{{ playbook_dir }}/scripts/vyos/azure-waagent.sh"
+    script = "{{ playbook_dir }}/scripts/vyos/cloud-init-vyos-modules.sh"
     environment_vars = [
-      "PROVISIONING_AGENT={{ provisioning_agent }}",
-      "WAAGENT_VERSION={{ waagent_version }}"
-    ]
-    execute_command = "{{ '{{' }} .Vars {{ '}}' }} sudo -E bash '{{ '{{' }} .Path {{ '}}' }}'"
-  }
-{% endif %}
-
-{% elif provisioning_agent == 'waagent' %}
-  # === Azure Linux Agent (waagent) provisioning mode ===
-
-  # Install Azure Linux Agent (waagent) as standalone provisioning agent
-  provisioner "shell" {
-    script = "{{ playbook_dir }}/scripts/vyos/azure-waagent.sh"
-    environment_vars = [
-      "PROVISIONING_AGENT={{ provisioning_agent }}",
-      "WAAGENT_VERSION={{ waagent_version }}"
+      "CLOUD_INIT={{ cloud_init_source }}"
     ]
     execute_command = "{{ '{{' }} .Vars {{ '}}' }} sudo -E bash '{{ '{{' }} .Path {{ '}}' }}'"
   }
 
-{% endif %}
+  # Install Azure Linux Agent (waagent) for Azure extensions
+  provisioner "shell" {
+    script = "{{ playbook_dir }}/scripts/vyos/azure-waagent.sh"
+    environment_vars = [
+      "PROVISIONING_AGENT=cloud-init",
+      "WAAGENT_VERSION={{ waagent_version }}"
+    ]
+    execute_command = "{{ '{{' }} .Vars {{ '}}' }} sudo -E bash '{{ '{{' }} .Path {{ '}}' }}'"
+  }
 
   # Install platform-specific packages (qemu-guest-agent for Azure)
   provisioner "shell" {

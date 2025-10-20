@@ -1,4 +1,69 @@
-# VyOS Cloud-Init Configure Mode Failure - Root Cause Analysis
+# VyOS Troubleshooting Guide
+
+## Cloud-Init and Waagent Configuration
+
+### Azure Configuration
+
+This project uses cloud-init as the primary provisioning agent with waagent for Azure extensions:
+
+- **Cloud-init**: Handles all provisioning tasks (SSH keys, user-data, initial configuration)
+- **Waagent**: Configured with `Provisioning.Agent=cloud-init` to manage Azure extensions only
+- **Azure datasource**: Configured with `apply_network_config: false` to let VyOS manage network
+- **VyOS modules**: Cloud-init configured with only VyOS-compatible modules (write_files, vyos_userdata)
+
+### Verifying the Configuration
+
+**Check cloud-init status and configuration:**
+```bash
+# Check cloud-init status
+cloud-init status --long
+
+# Verify Azure datasource configuration
+grep -A5 "Azure" /etc/cloud/cloud.cfg.d/91_azure_datasource.cfg
+# Should show: apply_network_config: false
+
+# Check VyOS modules configuration
+cat /etc/cloud/cloud.cfg.d/92_vyos_modules.cfg
+# Should show only: [write_files, vyos_userdata]
+```
+
+**Check waagent configuration:**
+```bash
+# Verify waagent provisioning mode
+grep "Provisioning.Agent" /etc/waagent.conf
+# Should show: Provisioning.Agent=cloud-init
+
+# Check waagent service
+sudo systemctl status walinuxagent
+
+# Check waagent logs
+sudo journalctl -u walinuxagent -n 100
+sudo cat /var/log/waagent.log | tail -100
+```
+
+**Expected behavior:**
+- Waagent should show it's deferring provisioning to cloud-init
+- Look for: "Provisioning handler is cloud-init"
+- Waagent should be managing extensions only
+
+### Troubleshooting Provisioning Issues
+
+**Verify waagent started by cloud-init:**
+
+```bash
+# Verify cloud-init started waagent
+sudo cat /var/log/cloud-init.log | grep -i "waagent"
+# Should show waagent being started by cloud-init via agent_command
+```
+
+**Common provisioning issues:**
+
+1. **Wrong Provisioning.Agent setting**: Should always be `cloud-init`
+2. **Waagent starting too early**: Cloud-init should start waagent via agent_command
+3. **Image not deprovisioned**: Image must be generalized with `waagent -deprovision+user -force`
+4. **Network config conflicts**: Azure datasource must have `apply_network_config: false`
+
+## VyOS Cloud-Init Configure Mode Failure - Root Cause Analysis
 
 ## Symptom
 

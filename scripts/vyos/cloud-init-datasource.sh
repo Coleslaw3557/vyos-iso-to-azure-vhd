@@ -13,7 +13,8 @@ EOF
 datasource_list: [ Azure ]
 datasource:
   Azure:
-    apply_network_config: true
+    apply_network_config: false
+    agent_command: [/usr/sbin/waagent, -start]
 EOF
     elif [[ "${CLOUD_INIT_DATASOURCE}" == "azure_fallback" ]]; then
         # Azure with NoCloud/ConfigDrive fallback for testing
@@ -21,7 +22,8 @@ EOF
 datasource_list: [ Azure, NoCloud, ConfigDrive ]
 datasource:
   Azure:
-    apply_network_config: true
+    apply_network_config: false
+    agent_command: [/usr/sbin/waagent, -start]
 EOF
     else
         echo "$0 - info: cloud_init_datasource will not run, not supported cloud_init_datasource"

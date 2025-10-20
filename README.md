@@ -16,9 +16,9 @@ Thank you!!
 
 - The Ansible playbook automatically converts images to cloud formats (VHD for Azure, VMDK for VMware, etc.)
 
-- **Configurable provisioning agent: Azure Linux Agent (waagent) or cloud-init**
+- **Cloud-init handles provisioning with Azure Linux Agent (waagent) managing Azure extensions**
 
-- **Integrated Azure Linux Agent (walinuxagent) v2.14.0.1 installed from MS Repo for proper Azure provisioning**
+- **Azure Linux Agent (walinuxagent) v2.14.0.1 installed from source for Azure extension support**
 
 - **Added FRR service ordering to prevent configuration race conditions** (this may no longer be needed though).
 
@@ -32,8 +32,8 @@ A lot of this was glued together with Claude LLM.
 - Cryptographic verification of ISOs using minisign (currently broken).
 - Configurable disk size (default: 20GB)
 - Automated VyOS installation via VNC boot commands and SSH.
-- **Configurable provisioning: Azure Linux Agent (waagent - default) or cloud-init**
-- **Azure Linux Agent v2.14.0.1 installed from source for proper Azure provisioning**
+- **Cloud-init for VM provisioning and configuration management**
+- **Azure Linux Agent v2.14.0.1 for Azure extension support**
 - **QEMU guest agent installation for Azure/KVM integration**
 - **Azure serial console enabled by default (ttyS0 at 115200 baud)**. This needs to be turned on in boot diagnostics in azure first though.
 - SSH-based provisioning for customization
@@ -109,34 +109,22 @@ conversion_formats:
 
 **Note:** VHD format uses fixed subformat and MB-alignment required by Azure.
 
-### Provisioning Agent Configuration
-
-**Choose provisioning agent (waagent or cloud-init):**
+### Azure Configuration
 
 ```yaml
-# Options: 'waagent' (Azure Linux Agent only) or 'cloud-init' (cloud-init with optional waagent)
-provisioning_agent: "waagent"  # Default: waagent
-
 # Azure Linux Agent configuration
 waagent_version: "2.14.0.1"  # Specific version to install from source
 ```
 
-**Supported provisioning agents:**
-
-- `provisioning_agent: "waagent"` - **Default**. Installs Azure Linux Agent as the standalone provisioning agent. Recommended for Azure deployments to avoid conflicts between cloud-init and waagent. Waagent is configured with `Provisioning.Agent=auto`.
-- `provisioning_agent: "cloud-init"` - Installs cloud-init as the primary provisioning agent. Optionally installs waagent alongside cloud-init if `cloud_init_with_waagent: true` (not recommended). When both are installed, waagent is configured with `Provisioning.Agent=cloud-init`.
-
-**Cloud-init configuration (only used when provisioning_agent is 'cloud-init'):**
+**Cloud-init configuration:**
 
 ```yaml
 cloud_init_source: "debian"  # Options: 'vyos' or 'debian'
 vyos_release: "current"      # Options: 'equuleus', 'sagitta', 'circinus', 'current'
-cloud_init_datasource: "azure"  # Options: 'azure', 'nocloud_configdrive', 'azure_fallback'
-cloud_init_with_waagent: false  # Install waagent alongside cloud-init (not recommended)
 platform: "qemu"  # Install qemu-guest-agent for Azure/KVM
 ```
 
-**Cloud-init options:**
+**Configuration options:**
 
 - `cloud_init_source: "debian"` - Install cloud-init from Debian repositories (recommended for Stream builds)
 - `cloud_init_source: "vyos"` - Install cloud-init from VyOS repositories (only available with VyOS LTS subscription)
@@ -145,26 +133,20 @@ platform: "qemu"  # Install qemu-guest-agent for Azure/KVM
   - `sagitta` - VyOS 1.4.x LTS (Debian 12) - **Requires VyOS subscription**
   - `current` - VyOS Stream/rolling releases (Debian 12) - **Use with Stream ISOs**
   - `circinus` - VyOS development (future release)
-- `cloud_init_datasource` options:
-  - `azure` - Use Azure datasource (recommended for Azure deployment)
-  - `nocloud_configdrive` - Use NoCloud and ConfigDrive datasources (for testing/other clouds)
-  - `azure_fallback` - Try Azure first, fall back to NoCloud/ConfigDrive
-- `cloud_init_with_waagent` - Install both cloud-init and waagent:
-  - `false` - **Default**. Cloud-init only (recommended)
-  - `true` - Install waagent alongside cloud-init (may cause conflicts)
 
 **Important:** 
 VyOS has restricted access to LTS package repositories (equuleus, sagitta) for paying subscribers only. For Stream builds (1.5-stream), use `cloud_init_source: "debian"` and `vyos_release: "current"` to avoid repository access issues.
 
 **Azure Provisioning:** 
 
-For Azure deployments, **waagent is strongly recommended** as the standalone provisioning agent. Azure expects waagent to report provisioning status. The default configuration (`provisioning_agent: "waagent"`) installs **WALinux Agent v2.14.0.1** from source and configures it as the primary provisioning agent with `Provisioning.Agent=waagent` (not `auto`). This explicit configuration ensures waagent takes full ownership of provisioning tasks including:
-- Reporting provisioning completion to Azure
-- Handling SSH keys
-- Setting hostname
-- Managing user accounts
+For Azure deployments, the build installs both cloud-init and waagent:
+- Cloud-init handles all provisioning tasks (SSH keys, user-data, initial configuration)
+- Waagent is configured with `Provisioning.Agent=cloud-init` to defer provisioning to cloud-init
+- Waagent manages Azure-specific extensions (monitoring, diagnostics, etc.)
+- Azure datasource is configured with `apply_network_config: false` to let VyOS manage network
+- Cloud-init starts waagent after provisioning via `agent_command`
 
-**Important**: The image is properly generalized during build using `waagent -deprovision+user -force` to ensure it's ready for Azure provisioning. This avoids conflicts that can occur when both cloud-init and waagent are installed.
+**Important**: The image is properly generalized during build using `waagent -deprovision+user -force` to ensure it's ready for Azure provisioning.
 
 ### Disk Size
 
@@ -188,13 +170,16 @@ The build automatically creates an Azure-ready VHD in fixed format:
 
 **Default credentials:** `vyos` / `vyos`
 
-**Provisioning Support:** By default, this build installs Azure Linux Agent (walinuxagent v2.14.0.1) as the standalone provisioning agent, along with qemu-guest-agent for proper integration with Azure. The provisioning agent is injected into the image **before first boot**, ensuring proper initialization and provisioning status reporting to Azure.
+**Provisioning Support:** This build uses cloud-init as the primary provisioning agent with Azure Linux Agent (walinuxagent v2.14.0.1) for Azure extensions support. Both agents are installed and configured to work together:
+- Cloud-init handles initial provisioning (SSH keys, user-data, configuration)
+- Waagent manages Azure-specific extensions and features
+- The Azure datasource is configured with network management disabled to let VyOS handle its own network
 
-**Important:** The build installs **WALinux Agent v2.14.0.1** from GitHub source (not from Debian repos) to ensure the latest features and compatibility. When using waagent as the standalone provisioning agent (default), it is configured with `Provisioning.Agent=waagent` to explicitly handle all provisioning tasks. This prevents the ambiguity that occurs with `auto` mode and ensures proper provisioning especially for VMs with managed identities or complex dependencies. If you choose cloud-init mode with waagent enabled, it will be configured with `Provisioning.Agent=cloud-init`. The image is properly generalized with `waagent -deprovision+user -force` during the build cleanup phase.
+**Important:** The build installs **WALinux Agent v2.14.0.1** from GitHub source to ensure the latest features and compatibility. Waagent is configured with `Provisioning.Agent=cloud-init` to defer provisioning to cloud-init while managing Azure extensions. The image is properly generalized with `waagent -deprovision+user -force` during the build cleanup phase.
 
 **Azure Serial Console:** The image is configured with serial console support enabled by default (ttyS0 at 115200 baud, 8N1). You can access the console through Azure Portal → VM → Serial Console or via Azure CLI. Both GRUB bootloader output and login prompt are available on the serial console for troubleshooting boot issues.
 
-**Cloud-Init Race Condition Fix (cloud-init mode only):** VyOS has a unique boot process where the config system mounts and applies configuration 16+ seconds after `vyos-router.service` starts. When using cloud-init as the provisioning agent, the build adds an active polling script that monitors `/tmp/vyos-config-status` to detect when VyOS configuration actually completes (not just when the service starts). Systemd ordering ensures `cloud-final.service` waits for `vyos-router.service` to start, then the polling script waits for actual configuration completion before allowing cloud-init user scripts to run. This prevents a race condition where cloud-init finishes before VyOS applies the config, leaving the VM without network connectivity during initial boot.
+**Cloud-Init Race Condition Fix:** VyOS has a unique boot process where the config system mounts and applies configuration 16+ seconds after `vyos-router.service` starts. The build adds an active polling script that monitors `/tmp/vyos-config-status` to detect when VyOS configuration actually completes (not just when the service starts). Systemd ordering ensures `cloud-final.service` waits for `vyos-router.service` to start, then the polling script waits for actual configuration completion before allowing cloud-init user scripts to run. This prevents a race condition where cloud-init finishes before VyOS applies the config, leaving the VM without network connectivity during initial boot.
 
 **FRR Service Ordering:** The build uses a **dual-layer approach** to ensure FRR is ready before network configuration:
 
@@ -347,16 +332,16 @@ sudo journalctl --since "05:40" --until "05:45" | grep -E "(error|fail|vyos)"
 
 **Note:** Adjust the `--since` and `--until` times to match when your VM was provisioned.
 
-### Troubleshooting WALinux Agent Provisioning Issues
+### Troubleshooting Azure Provisioning Issues
 
-If you experience problems with Azure VMs failing to provision (especially with managed identities), check these items:
+If you experience problems with Azure VMs failing to provision, check these items:
 
 **Verify waagent configuration:**
 
 ```bash
 # Check the provisioning agent setting
 grep "Provisioning.Agent" /etc/waagent.conf
-# Should show: Provisioning.Agent=waagent (NOT auto)
+# Should show: Provisioning.Agent=cloud-init
 
 # Check waagent service status
 sudo systemctl status walinuxagent
@@ -368,9 +353,9 @@ sudo cat /var/log/waagent.log | grep -i "provisioning"
 
 **Common provisioning issues:**
 
-1. **Provisioning.Agent=auto**: If set to "auto" without cloud-init present, waagent doesn't take full ownership of provisioning, causing timeouts with managed identities
+1. **Wrong Provisioning.Agent setting**: Should be `cloud-init` since cloud-init handles provisioning
 2. **Image not deprovisioned**: If the image wasn't properly generalized with `waagent -deprovision+user -force`, Azure may fail to provision correctly
-3. **Service not running**: Ensure walinuxagent.service is enabled and running
+3. **Service not running**: Ensure both cloud-init and walinuxagent.service are enabled and running
 
 ## Architecture
 
@@ -394,23 +379,23 @@ build.yml
 4. Wait 90s for installation to complete
 5. Reboot into installed system
 6. Packer connects via SSH (vyos/vyos)
-7. **Provisioning agent installation:**
-   - **If provisioning_agent: "waagent" (default):**
-     - Install Azure Linux Agent (walinuxagent v2.14.0.1 from source)
-     - Configure waagent with Provisioning.Agent=waagent (explicit provisioning ownership)
-   - **If provisioning_agent: "cloud-init":**
-     - Install cloud-init packages
-     - Configure Azure datasource
-     - Add systemd ordering (cloud-final waits for vyos-router)
-     - Optionally install waagent if cloud_init_with_waagent: true
-8. Install qemu-guest-agent
-9. Configure Azure serial console (GRUB + getty on ttyS0)
-10. System cleanup and optimization:
+7. **Install cloud-init:**
+   - Install cloud-init packages from Debian repositories
+   - Configure Azure datasource with apply_network_config=false
+   - Configure cloud-init with VyOS-compatible modules only
+   - Add systemd ordering (cloud-final waits for vyos-router)
+8. **Install Azure Linux Agent (waagent):**
+   - Install walinuxagent v2.14.0.1 from GitHub source
+   - Configure waagent with Provisioning.Agent=cloud-init
+   - Waagent manages Azure extensions only
+9. Install qemu-guest-agent
+10. Configure Azure serial console (GRUB + getty on ttyS0)
+11. System cleanup and optimization:
     - Run `waagent -deprovision+user -force` to generalize for Azure
     - Remove SSH host keys, machine-id, logs, and history
     - Zero out free disk space
-11. Shutdown and convert to final qcow2
-12. Convert qcow2 to VHD/VMDK (if enabled)
+12. Shutdown and convert to final qcow2
+13. Convert qcow2 to VHD/VMDK (if enabled)
 
 ## License
 

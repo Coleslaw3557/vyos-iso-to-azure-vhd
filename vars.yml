@@ -9,18 +9,12 @@ static_iso_sig_url: "https://community-downloads.vyos.dev/stream/1.5-stream-2025
 static_iso_filename: "vyos-1.5-stream-2025-Q2-generic-amd64.iso"
 static_tag_name: "1.5-stream-2025-Q2"
 
-# Provisioning agent configuration
-# Options: 'waagent' (Azure Linux Agent only) or 'cloud-init' (cloud-init with optional waagent)
-provisioning_agent: "waagent"
-
 # Azure Linux Agent (waagent) configuration
 waagent_version: "2.14.0.1"  # Specific version to install from source
 
-# Cloud-init configuration (only used when provisioning_agent is 'cloud-init')
+# Cloud-init configuration
 cloud_init_source: "debian"  # Options: 'vyos' or 'debian'
 vyos_release: "current"  # Options: 'equuleus', 'sagitta', 'circinus', 'current'
-cloud_init_datasource: "azure"  # Options: 'azure', 'nocloud_configdrive', 'azure_fallback'
-cloud_init_with_waagent: false  # Install waagent alongside cloud-init (not recommended)
 
 # Platform configuration
 platform: "qemu"  # Install qemu-guest-agent for Azure/KVM

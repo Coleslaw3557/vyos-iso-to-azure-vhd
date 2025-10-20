@@ -13,15 +13,11 @@ set -x
 
 export DEBIAN_FRONTEND=noninteractive
 
-# Determine the provisioning mode
-# PROVISIONING_AGENT can be: 'waagent' (standalone) or 'cloud-init' (with optional waagent)
-PROVISIONING_MODE="${PROVISIONING_AGENT:-waagent}"
-
 # Use provided WAAGENT_VERSION or default to 2.14.0.1
 WAAGENT_VERSION="${WAAGENT_VERSION:-2.14.0.1}"
 
 echo "Installing Azure Linux Agent (waagent) v${WAAGENT_VERSION} from source..."
-echo "Provisioning mode: ${PROVISIONING_MODE}"
+echo "Configuration: cloud-init handles provisioning, waagent handles extensions"
 
 # Install required dependencies for building from source
 apt update -qq
@@ -91,20 +87,15 @@ SERVICEEOF
 # Reload systemd to pick up the new service
 systemctl daemon-reload
 
-# Configure waagent based on provisioning mode
-# Note: For VyOS, we always disable provisioning regardless of mode
-if [[ "${PROVISIONING_MODE}" == "cloud-init" ]]; then
-    echo "Configuring waagent to work with cloud-init (provisioning disabled for VyOS)"
-else
-    echo "Configuring waagent as monitoring agent only (provisioning disabled for VyOS)"
-fi
+# Configure waagent to work with cloud-init
+echo "Configuring waagent to work with cloud-init (extensions only mode)"
 
 cat <<EOF > /etc/waagent.conf
 # Microsoft Azure Linux Agent Configuration (v${WAAGENT_VERSION})
-# Minimal waagent.conf for VyOS on Azure
+# Configured for extensions only - cloud-init handles provisioning
 
-# CRITICAL: Disable ALL provisioning to prevent VyOS conflicts
-Provisioning.Agent=disabled
+# CRITICAL: Always use cloud-init for provisioning
+Provisioning.Agent=cloud-init
 Provisioning.DeleteRootPassword=n
 Provisioning.RegenerateSshHostKeyPair=n
 Provisioning.MonitorHostName=n

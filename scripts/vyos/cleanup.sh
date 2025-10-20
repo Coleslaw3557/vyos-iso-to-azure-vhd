@@ -20,7 +20,13 @@ rm -f /etc/ssh/ssh_host_*
 dpkg-reconfigure openssh-server
 
 # cleanup apt
+# Mark cloud-init and dependencies as manually installed to prevent autoremove
+apt-mark manual cloud-init cloud-utils cloud-guest-utils cloud-image-utils ifupdown || true
+
+# Remove debian repository
 rm -f /etc/apt/sources.list.d/debian.list
+
+# Run autoremove but it should now keep cloud-init
 apt -y autoremove --purge
 apt-get clean
 
